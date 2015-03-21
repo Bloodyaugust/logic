@@ -10,101 +10,263 @@ function moveModal() {
     var $modal = $('.modal'),
         gameOffset = $(app.canvas).offset();
 
-        $modal.offset({
-            top: gameOffset.top - 5,
-            left: gameOffset.left - 5
-        });
+    $modal.offset({
+        top: gameOffset.top - 5,
+        left: gameOffset.left - 5
+    });
 }
 
 function replaceAt(string, index, character) {
-    return string.substr(0, index) + character + string.substr(index+character.length);
+    return string.substr(0, index) + character + string.substr(index +
+        character.length);
 }
 
 function start() {
     var startLoad = new Date;
 
-    window.app = new SL.Game({canvas: document.getElementById('GameCanvas')});
-
-    app.assetCollection = new SL.AssetCollection('res/assets.json', app, function () {
-        _gaq.push(['_trackEvent', 'Game', 'Load', '', (new Date - startLoad) / 1000]);
-        $('.canvas-container').append(domjs.build(templates.modal));
-        moveModal();
-        $(window).resize(function () {
-            moveModal();
-        });
-
-        var loadingScene = new SL.Scene('loading', [], function () {
-        }, app);
-
-        loadingScene.addEntity(new SL.Loader({
-            assetCollection: app.assetCollection,
-            screenSize: SCREEN_SIZE,
-            loadCallback: function () { app.transitionScene('game'); },
-            barColor: 'blue',
-            textColor: 'green'
-        }));
-
-        var gameScene = new SL.Scene('game', [], function () {
-            var modal = $('.modal');
-            modal.empty();
-            modal.off();
-            modal.hide();
-
-            app.currentScene.addEntity({
-                type: 'background',
-                sprite: new PIXI.Sprite(app.assetCollection.getTexture('background')),
-                update: function () {}
-            });
-            app.currentScene.addEntity(new Evolver());
-        }, app);
-
-        app.addScene(loadingScene);
-        app.addScene(gameScene);
-        app.transitionScene('loading');
-
-        app.start();
+    window.app = new SL.Game({
+        canvas: document.getElementById('GameCanvas')
     });
+
+    app.assetCollection = new SL.AssetCollection('res/assets.json', app,
+        function() {
+            /*_gaq.push(['_trackEvent', 'Game', 'Load', '', (new Date - startLoad) / 1000]);
+		$('.canvas-container').append(domjs.build(templates.modal));
+		moveModal();
+		$(window).resize(function () {
+		    moveModal();
+		});*/
+
+            var loadingScene = new SL.Scene('loading', [], function() {},
+                app);
+
+            loadingScene.addEntity(new SL.Loader({
+                assetCollection: app.assetCollection,
+                screenSize: SCREEN_SIZE,
+                loadCallback: function() {
+                    app.transitionScene('game');
+                },
+                barColor: 'blue',
+                textColor: 'green'
+            }));
+
+            var gameScene = new SL.Scene('game', [], function() {
+                /*var modal = $('.modal');
+			modal.empty();
+			modal.off();
+			modal.hide();*/
+
+                app.currentScene.addEntity({
+                    type: 'background',
+                    sprite: new PIXI.Sprite(app.assetCollection
+                        .getTexture('background')),
+                    update: function() {
+						while (app.currentScene.getEntitiesByTag('food').length < 5) {
+							app.currentScene.addEntity(new Food({
+								position: new SCREEN_SIZE.clone().randomize()
+							}));
+						}
+						while (app.currentScene.getEntitiesByTag('creature').length < 150) {
+							app.currentScene.addEntity(new Creature({
+								position: new SCREEN_SIZE.clone().randomize(),
+								inputs: [
+									'radarFood',
+									'radarEdge'
+								],
+								logicCircuit: seedCircuit({
+									inputs: 8,
+									outputs: 4,
+									genomeLength: 64
+								})
+							}))
+						}
+					}
+                });
+            }, app);
+
+            app.addScene(loadingScene);
+            app.addScene(gameScene);
+            app.transitionScene('loading');
+
+            app.start();
+        });
 }
 
-function LogicGate (type) {
+function Creature(config) {
     var me = this;
 
-    me.type = type;
-    me.in = [
-        0,
-        0
-    ];
+    me.tag = 'creature';
+	me.health = 10;
+    me.sprite = new PIXI.Sprite(app.assetCollection.getTexture(me.tag));
+    me.sprite.anchor.x = 0.5;
+    me.sprite.anchor.y = 0.5;
+    me.sprite.position = config.position;
+    me.sprite.rotation = 0;
 
-    me.resolve = function () {
-        var a = me.in[0],
-            b = me.in[1];
+    me.inputs = config.inputs;
+
+    me.logicCircuit = config.logicCircuit;
+
+    me.update = function() {
+        var controlOutput, food;
+
+		if (me.health >= 0) {
+			me.logicCircuit.input = parseInput();
+			food = app.currentScene.getEntitiesByTag('food');
+
+			controlOutput = me.logicCircuit.resolve();
+
+			if (controlOutput[0]) {
+				me.sprite.position.x += 125 * app.deltaTime;
+			}
+			if (controlOutput[1]) {
+				me.sprite.position.x -= 125 * app.deltaTime;
+			}
+			if (controlOutput[2]) {
+				me.sprite.position.y += 125 * app.deltaTime;
+			}
+			if (controlOutput[3]) {
+				me.sprite.position.y -= 125 * app.deltaTime;
+			}
+
+			if (me.sprite.position.x <= 0 ||
+				me.sprite.position.x >= app.screenSize.x ||
+				me.sprite.position.y <= 0 ||
+				me.sprite.position.y >= app.screenSize.y) {
+				me.health = 0;
+			}
+
+			me.health -= app.deltaTime;
+
+			for (var i = 0; i < food.length; i ++) {
+				if (me.sprite.position.distance(food[i].sprite.position) <= 15) {
+					me.health += 10;
+					food[i].eaten = true;
+				}
+			}
+		} else {
+			app.currentScene.removeEntity(me);
+		}
+    }
+
+    function parseInput() {
+        var input = [],
+            food = app.currentScene.getEntitiesByTag('food'),
+            found = false;
+
+        for (var i = 0; i < me.inputs.length; i++) {
+            found = false;
+
+            if (me.inputs[i] === 'radarFood') {
+                for (var i2 = 0; i2 < food.length; i2++) {
+                    if (me.sprite.position.distance(food[i2].sprite.position) <= 25) {
+                        found = true;
+
+						if (me.sprite.position.x > food[i2].sprite.position.x) {
+							input.push(0, 1);
+						} else {
+							input.push(1, 0);
+						}
+						if (me.sprite.position.y > food[i2].sprite.position.y) {
+							input.push(0, 1);
+						} else {
+							input.push(1, 0);
+						}
+                        break;
+                    }
+                }
+
+				found ? null : input.push(0, 0, 0, 0);
+            } else if (me.inputs[i] === 'radarEdge') {
+				if (me.sprite.position.x <= 15) {
+					input.push(1);
+				} else {
+					input.push(0);
+				}
+				if (me.sprite.position.x >= SCREEN_SIZE.x - 15) {
+					input.push(1);
+				} else {
+					input.push(0);
+				}
+				if (me.sprite.position.y <= 15) {
+					input.push(1);
+				} else {
+					input.push(0);
+				}
+				if (me.sprite.position.y >= SCREEN_SIZE.y - 15) {
+					input.push(1);
+				} else {
+					input.push(0);
+				}
+            }
+        }
+
+        return input;
+    }
+}
+
+function Food(config) {
+    var me = this;
+
+    me.tag = 'food';
+    me.sprite = new PIXI.Sprite(app.assetCollection.getTexture(me.tag));
+    me.sprite.anchor.x = 0.5;
+    me.sprite.anchor.y = 0.5;
+    me.sprite.position = config.position;
+    me.sprite.rotation = 0;
+
+	me.eaten = false;
+
+    me.update = function() {
+		if (me.eaten) {
+			app.currentScene.removeEntity(me);
+		}
+    }
+}
+
+function LogicGate(config) {
+    var me = this;
+
+    me.tag = 'gate';
+    me.type = config.type;
+    me.sources = [];
+    me.circuit = config.circuit;
+
+    me.out = 0;
+
+    me.resolve = function() {
+        var a = me.sources[0].tag === 'gate' ? me.sources[0].out : me.circuit
+            .input[me.sources[0]],
+            b = me.sources[1].tag === 'gate' ? me.sources[1].out : me.circuit
+            .input[me.sources[1]];
 
         switch (me.type) {
             case 'AND':
-                return (a && b) ? 1 : 0;
+                me.out = (a && b) ? 1 : 0;
                 break;
             case 'OR':
-                return (a || b) ? 1 : 0;
+                me.out = (a || b) ? 1 : 0;
                 break;
             case 'NOT':
-                return (!a) ? 1 : 0;
+                me.out = (!a) ? 1 : 0;
                 break;
             case 'NAND':
-                return !(a && b) ? 1 : 0;
+                me.out = !(a && b) ? 1 : 0;
                 break;
             case 'NOR':
-                return (!a && !b) ? 1 : 0;
+                me.out = (!a && !b) ? 1 : 0;
                 break;
             case 'XOR':
-                return ((a || b) && !(a && b)) ? 1 : 0;
+                me.out = ((a || b) && !(a && b)) ? 1 : 0;
                 break;
             default:
+                me.out = 0;
                 break;
         }
     }
 }
 
-function LogicCircuit (genome) {
+function LogicCircuit(genome) {
     var me = this;
 
     me.genome = genome;
@@ -117,51 +279,147 @@ function LogicCircuit (genome) {
         'NOR',
         'XOR'
     ];
+    me.input = [];
+    me.outputs = [];
 
     for (var i = 0; i < me.genome.length; i++) {
         me.gates.push(
-            new LogicGate(
-                me.gateTypes[parseInt(me.genome[i])]));
+            new LogicGate({
+                type: me.gateTypes[parseInt(me.genome[i])],
+                circuit: me
+            })
+        );
     }
 
-    me.resolve = function (input) {
+    me.addOutput = function(index) {
+        me.outputs.push(me.gates[index]);
+    }
+
+    me.setOutputs = function(indices) {
+        me.outputs = [];
+        for (var i = 0; i < indices.length; i++) {
+            me.outputs.push(me.gates[indices[i]]);
+        }
+    }
+
+    me.resolve = function(input) {
         var output = [],
             gateVal;
 
+        me.input = input ? input : me.input;
+
         for (i = 0; i < me.gates.length; i++) {
-            if (i < 10) {
-                me.gates[i].in = input[i];
-            }
+            me.gates[i].resolve();
+        }
 
-            gateVal = me.gates[i].resolve();
-
-            if (me.gates[i + 10]) {
-                me.gates[i + 10].in[0] = gateVal;
-            } else {
-                output.push(gateVal);
-            }
-            if (me.gates[i + 11]) {
-                me.gates[i + 11].in[1] = gateVal;
-            }
+        for (i = 0; i < me.outputs.length; i++) {
+            output.push(me.outputs[i].out);
         }
 
         return output;
     }
 }
 
-function Evolver () {
+function seedCircuit(config) {
+    var inputs = config.inputs,
+        outputs = config.outputs,
+        genomeLength = config.genomeLength,
+		genome = '',
+        usedOutputs = {},
+        validGateFound = false,
+        rnd, circuit;
+
+	for (var i = 0; i < genomeLength; i++) {
+		genome += Math.floor(Math.random() * 6);
+	}
+
+	circuit = new LogicCircuit(genome);
+
+    for (var i = 0; i < inputs; i++) {
+        while (!validGateFound) {
+            rnd = Math.floor(Math.random() * genomeLength);
+
+            if (!circuit.gates[rnd].sources[0]) {
+                circuit.gates[rnd].sources[0] = i;
+                validGateFound = true;
+            }
+        }
+        validGateFound = false;
+
+        circuit.input.push(0);
+    }
+
+    for (i = 0; i < outputs; i++) {
+        while (!validGateFound) {
+            rnd = Math.floor(Math.random() * genomeLength);
+
+            if (!usedOutputs[rnd]) {
+                circuit.addOutput(rnd);
+                usedOutputs[rnd] = true;
+                validGateFound = true;
+            }
+        }
+        validGateFound = false;
+    }
+
+    for (i = 0; i < genomeLength; i++) {
+        while (!circuit.gates[i].sources[0]) {
+            rnd = Math.floor(Math.random() * genomeLength);
+
+            if (rnd !== i) {
+                circuit.gates[i].sources[0] = circuit.gates[rnd];
+            }
+        }
+        while (!circuit.gates[i].sources[1]) {
+            rnd = Math.floor(Math.random() * genomeLength);
+
+            if (rnd !== i) {
+                circuit.gates[i].sources[1] = circuit.gates[rnd];
+            }
+        }
+    }
+
+    return circuit;
+}
+
+function Evolver() {
     var me = this;
 
-    me.data = [[[1, 0],[0, 0],[1, 1],[0, 1],[1, 1],[1, 1],[1, 0],[0, 0],[0, 0],[0, 1]],
-        [[1, 1],[1, 0],[1, 1],[0, 0],[1, 1],[0, 1],[1, 1],[0, 0],[1, 1],[1, 1]]];
+    me.data = [
+        [
+            [1, 0],
+            [0, 0],
+            [1, 1],
+            [0, 1],
+            [1, 1],
+            [1, 1],
+            [1, 0],
+            [0, 0],
+            [0, 0],
+            [0, 1]
+        ],
+        [
+            [1, 1],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            [0, 1],
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            [1, 1]
+        ]
+    ];
     me.expects = [1, 0];
     me.generation = 0;
     me.mutationRate = 0.01;
     me.generationSize = 100;
-    me.lastBestGenome = '0112115320014113121231154123121354151321003511541123132045211231451232005141541321315205111424510315';
+    me.lastBestGenome =
+        '0112115320014113121231154123121354151321003511541123132045211231451232005141541321315205111424510315';
     me.lastBestFitness = 1;
 
-    me.update = function () {
+    me.update = function() {
         var circuits = [],
             currentBestFitness = me.lastBestFitness,
             currentBestGenome = me.lastBestGenome,
@@ -186,30 +444,33 @@ function Evolver () {
         }
     }
 
-    me.findFitness = function (results) {
+    me.findFitness = function(results) {
         var distance = [],
             average = 0;
 
-            for (var i = 0; i < results[0].length; i++) {
-                average += results[0][i];
-            }
-            distance.push(Math.abs((average / results[0].length) - me.expects[0]));
-            average = 0;
+        for (var i = 0; i < results[0].length; i++) {
+            average += results[0][i];
+        }
+        distance.push(Math.abs((average / results[0].length) - me.expects[
+            0]));
+        average = 0;
 
-            for (i = 0; i < results[1].length; i++) {
-                average += results[1][i];
-            }
-            distance.push(Math.abs((average / results[1].length) - me.expects[1]));
+        for (i = 0; i < results[1].length; i++) {
+            average += results[1][i];
+        }
+        distance.push(Math.abs((average / results[1].length) - me.expects[
+            1]));
 
-            return (distance[0] + distance[1]) / 2;
+        return (distance[0] + distance[1]) / 2;
     }
 
-    me.generateGenome = function () {
+    me.generateGenome = function() {
         var newGenome = me.lastBestGenome;
 
         for (var i = 0; i < 100; i++) {
             if (Math.random() <= me.mutationRate) {
-                newGenome = replaceAt(newGenome, i, Math.floor(Math.random() * 6).toString());
+                newGenome = replaceAt(newGenome, i, Math.floor(Math.random() *
+                    6).toString());
             }
         }
 

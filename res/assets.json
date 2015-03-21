@@ -1,17 +1,19 @@
 {
-    "images": [
-        "/img/background.png"
-    ],
+	"images": [
+		"/img/background.png",
+		"/img/creature.png",
+		"/img/food.png"
+	],
 
-    "sounds": [
+	"sounds": [
 
-    ],
+	],
 
-    "settings": {
+	"settings": {
 
-    },
+	},
 
-    "keys": {
+	"keys": {
 
-    }
+	}
 }
