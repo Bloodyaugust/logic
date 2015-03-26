@@ -66,22 +66,30 @@ function start() {
 								position: new SCREEN_SIZE.clone().randomize()
 							}));
 						}
-						while (app.currentScene.getEntitiesByTag('creature').length < 150) {
-							app.currentScene.addEntity(new Creature({
-								position: new SCREEN_SIZE.clone().randomize(),
-								inputs: [
-									'radarFood',
-									'radarEdge'
-								],
-								logicCircuit: seedCircuit({
-									inputs: 8,
-									outputs: 4,
-									genomeLength: 64
-								})
-							}))
-						}
 					}
                 });
+
+                while (app.currentScene.getEntitiesByTag('food').length < 5) {
+                    app.currentScene.addEntity(new Food({
+                        position: new SCREEN_SIZE.clone().randomize()
+                    }));
+                }
+
+				for (var i = 0; i < 15; i++) {
+					app.currentScene.addEntity(new Creature({
+						position: new SCREEN_SIZE.clone().randomize(),
+						inputs: [
+							'radarFood'
+						],
+						logicCircuit: seedCircuit({
+							inputs: 4,
+							outputs: 4,
+							genomeLength: 64
+						})
+					}))
+				}
+
+				app.currentScene.addEntity(new Evolver());
             }, app);
 
             app.addScene(loadingScene);
@@ -97,6 +105,7 @@ function Creature(config) {
 
     me.tag = 'creature';
 	me.health = 10;
+	me.score = 0;
     me.sprite = new PIXI.Sprite(app.assetCollection.getTexture(me.tag));
     me.sprite.anchor.x = 0.5;
     me.sprite.anchor.y = 0.5;
@@ -108,7 +117,10 @@ function Creature(config) {
     me.logicCircuit = config.logicCircuit;
 
     me.update = function() {
-        var controlOutput, food;
+        var controlOutput, food,
+            inputFound = false,
+            moveX = 0,
+            moveY = 0;
 
 		if (me.health >= 0) {
 			me.logicCircuit.input = parseInput();
@@ -118,22 +130,32 @@ function Creature(config) {
 
 			if (controlOutput[0]) {
 				me.sprite.position.x += 125 * app.deltaTime;
+                moveX += 125;
 			}
 			if (controlOutput[1]) {
 				me.sprite.position.x -= 125 * app.deltaTime;
+                moveX -= 125;
 			}
 			if (controlOutput[2]) {
 				me.sprite.position.y += 125 * app.deltaTime;
+                moveY += 125;
 			}
 			if (controlOutput[3]) {
 				me.sprite.position.y -= 125 * app.deltaTime;
+                moveY -= 125;
 			}
 
-			if (me.sprite.position.x <= 0 ||
-				me.sprite.position.x >= app.screenSize.x ||
-				me.sprite.position.y <= 0 ||
-				me.sprite.position.y >= app.screenSize.y) {
-				me.health = 0;
+            if (me.sprite.position.x < 0) {
+				me.sprite.position.x = SCREEN_SIZE.x;
+			}
+            if (me.sprite.position.x > SCREEN_SIZE.x) {
+				me.sprite.position.x = 0;
+			}
+            if (me.sprite.position.y < 0) {
+				me.sprite.position.y = SCREEN_SIZE.y;
+			}
+            if (me.sprite.position.y > SCREEN_SIZE.y) {
+				me.sprite.position.y = 0;
 			}
 
 			me.health -= app.deltaTime;
@@ -142,41 +164,43 @@ function Creature(config) {
 				if (me.sprite.position.distance(food[i].sprite.position) <= 15) {
 					me.health += 10;
 					food[i].eaten = true;
+					me.score += 500;
 				}
 			}
-		} else {
-			app.currentScene.removeEntity(me);
+
+            if (moveX === 0 && moveY === 0) {
+                me.health = 0;
+                me.score = 0;
+            }
+
+			me.score += 1;
 		}
     }
 
     function parseInput() {
         var input = [],
             food = app.currentScene.getEntitiesByTag('food'),
-            found = false;
+            closestFood = food[0];
 
         for (var i = 0; i < me.inputs.length; i++) {
-            found = false;
-
             if (me.inputs[i] === 'radarFood') {
-                for (var i2 = 0; i2 < food.length; i2++) {
-                    if (me.sprite.position.distance(food[i2].sprite.position) <= 25) {
-                        found = true;
-
-						if (me.sprite.position.x > food[i2].sprite.position.x) {
-							input.push(0, 1);
-						} else {
-							input.push(1, 0);
-						}
-						if (me.sprite.position.y > food[i2].sprite.position.y) {
-							input.push(0, 1);
-						} else {
-							input.push(1, 0);
-						}
-                        break;
+                for (var i2 = 1; i2 < food.length; i2++) {
+                    if (me.sprite.position.distance(food[i2].sprite.position) <
+                        me.sprite.position.distance(closestFood.sprite.position)) {
+						closestFood = food[i2];
                     }
                 }
 
-				found ? null : input.push(0, 0, 0, 0);
+                if (me.sprite.position.x > closestFood.sprite.position.x) {
+                    input.push(0, 1);
+                } else {
+                    input.push(1, 0);
+                }
+                if (me.sprite.position.y > closestFood.sprite.position.y) {
+                    input.push(0, 1);
+                } else {
+                    input.push(1, 0);
+                }
             } else if (me.inputs[i] === 'radarEdge') {
 				if (me.sprite.position.x <= 15) {
 					input.push(1);
@@ -231,6 +255,7 @@ function LogicGate(config) {
     me.type = config.type;
     me.sources = [];
     me.circuit = config.circuit;
+    me.circuitIndex = config.circuitIndex;
 
     me.out = 0;
 
@@ -286,7 +311,8 @@ function LogicCircuit(genome) {
         me.gates.push(
             new LogicGate({
                 type: me.gateTypes[parseInt(me.genome[i])],
-                circuit: me
+                circuit: me,
+                circuitIndex: i
             })
         );
     }
@@ -385,95 +411,82 @@ function seedCircuit(config) {
 function Evolver() {
     var me = this;
 
-    me.data = [
-        [
-            [1, 0],
-            [0, 0],
-            [1, 1],
-            [0, 1],
-            [1, 1],
-            [1, 1],
-            [1, 0],
-            [0, 0],
-            [0, 0],
-            [0, 1]
-        ],
-        [
-            [1, 1],
-            [1, 0],
-            [1, 1],
-            [0, 0],
-            [1, 1],
-            [0, 1],
-            [1, 1],
-            [0, 0],
-            [1, 1],
-            [1, 1]
-        ]
-    ];
-    me.expects = [1, 0];
     me.generation = 0;
     me.mutationRate = 0.01;
-    me.generationSize = 100;
-    me.lastBestGenome =
-        '0112115320014113121231154123121354151321003511541123132045211231451232005141541321315205111424510315';
-    me.lastBestFitness = 1;
+    me.generationalRate = 0.2;
+    me.lastBestCreature = app.currentScene.getEntitiesByTag('creature')[0];
+    me.lastBestFitness = 0;
+    me.gateTypes = [
+        'AND',
+        'OR',
+        'NOT',
+        'NAND',
+        'NOR',
+        'XOR'
+    ];
 
     me.update = function() {
-        var circuits = [],
-            currentBestFitness = me.lastBestFitness,
-            currentBestGenome = me.lastBestGenome,
-            results = [0, 0];
+        var creatures = app.currentScene.getEntitiesByTag('creature');
 
-        if (me.lastBestFitness !== 0) {
-            for (var i = 0; i < me.generationSize; i++) {
-                circuits.push(new LogicCircuit(me.generateGenome()));
-                results[0] = circuits[i].resolve(me.data[0]);
-                results[1] = circuits[i].resolve(me.data[1]);
-
-                if (me.findFitness(results) < me.lastBestFitness) {
-                    currentBestFitness = me.findFitness(results);
-                    currentBestGenome = circuits[i].genome;
+        for (var i = 0; i < creatures.length; i++) {
+            if (creatures[i].health <= 0) {
+                if (Math.random() <= me.generationalRate) {
+                    creatures[i].logicCircuit = seedCircuit({
+                        inputs: 4,
+                        outputs: 4,
+                        genomeLength: 64
+                    });
+                    creatures[i].sprite.position = SCREEN_SIZE.clone().randomize();
+                    me.generation++;
+                } else {
+                    me.mutateCreature(creatures[i]);
                 }
             }
 
-            me.lastBestFitness = currentBestFitness;
-            me.lastBestGenome = currentBestGenome;
-            me.generation++;
-            console.log(me.generation, me.lastBestFitness, me.lastBestGenome);
+			if (creatures[i].score > me.lastBestFitness) {
+				me.lastBestFitness = creatures[i].score;
+				me.lastBestGenome = creatures[i].logicCircuit.genome;
+			}
         }
     }
 
-    me.findFitness = function(results) {
-        var distance = [],
-            average = 0;
+    me.mutateCreature = function(creature) {
+        var baseCircuit = me.lastBestCreature.logicCircuit,
+            mutateCircuit = creature.logicCircuit;
 
-        for (var i = 0; i < results[0].length; i++) {
-            average += results[0][i];
+        for (var i = 0; i < baseCircuit.gates.length; i++) {
+            mutateCircuit.gates[i].type = baseCircuit.gates[i].type;
+
+            mutateCircuit.gates[i].sources[0] = baseCircuit.gates[i].sources[0].tag === 'gate' ?
+                mutateCircuit.gates[baseCircuit.gates[i].sources[0].circuitIndex] :
+                baseCircuit.gates[i].sources[0];
+            mutateCircuit.gates[i].sources[1] = baseCircuit.gates[i].sources[1].tag === 'gate' ?
+                mutateCircuit.gates[baseCircuit.gates[i].sources[1].circuitIndex] :
+                baseCircuit.gates[i].sources[1];
         }
-        distance.push(Math.abs((average / results[0].length) - me.expects[
-            0]));
-        average = 0;
 
-        for (i = 0; i < results[1].length; i++) {
-            average += results[1][i];
-        }
-        distance.push(Math.abs((average / results[1].length) - me.expects[
-            1]));
-
-        return (distance[0] + distance[1]) / 2;
-    }
-
-    me.generateGenome = function() {
-        var newGenome = me.lastBestGenome;
-
-        for (var i = 0; i < 100; i++) {
+        for (i = 0; i < mutateCircuit.gates.length; i++) {
             if (Math.random() <= me.mutationRate) {
-                newGenome = replaceAt(newGenome, i, Math.floor(Math.random() *
-                    6).toString());
+                mutateCircuit.gates[i].type = me.gateTypes[Math.floor(Math.random() * 6)]
+            }
+            if (Math.random() <= me.mutationRate) {
+                if (Math.random() <= 0.5) {
+                    mutateCircuit.gates[i].sources[0] = Math.floor(Math.random() * mutateCircuit.input.length);
+                } else {
+                    mutateCircuit.gates[i].sources[0] = mutateCircuit.gates[Math.floor(Math.random() * mutateCircuit.gates.length)];
+                }
+            }
+            if (Math.random() <= me.mutationRate) {
+                if (Math.random() <= 0.5) {
+                    mutateCircuit.gates[i].sources[1] = Math.floor(Math.random() * mutateCircuit.input.length);
+                } else {
+                    mutateCircuit.gates[i].sources[1] = mutateCircuit.gates[Math.floor(Math.random() * mutateCircuit.gates.length)];
+                }
             }
         }
 
-        return newGenome;
+        creature.health = 10;
+        creature.score = 0;
+        creature.sprite.position = SCREEN_SIZE.clone().randomize();
     }
 }
