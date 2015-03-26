@@ -106,6 +106,7 @@ function Creature(config) {
     me.tag = 'creature';
 	me.health = 10;
 	me.score = 0;
+    me.timeLived = 0;
     me.sprite = new PIXI.Sprite(app.assetCollection.getTexture(me.tag));
     me.sprite.anchor.x = 0.5;
     me.sprite.anchor.y = 0.5;
@@ -123,6 +124,8 @@ function Creature(config) {
             moveY = 0;
 
 		if (me.health >= 0) {
+            me.timeLived += app.deltaTime;
+
 			me.logicCircuit.input = parseInput();
 			food = app.currentScene.getEntitiesByTag('food');
 
@@ -424,6 +427,8 @@ function Evolver() {
         'NOR',
         'XOR'
     ];
+    me.tellInterval = 5;
+    me.timeToTell = me.tellInterval;
 
     me.update = function() {
         var creatures = app.currentScene.getEntitiesByTag('creature');
@@ -447,6 +452,12 @@ function Evolver() {
 				me.lastBestFitness = creatures[i].score;
 				me.lastBestGenome = creatures[i].logicCircuit.genome;
 			}
+        }
+
+        me.timeToTell -= app.deltaTime;
+        if (me.timeToTell <= 0) {
+            me.timeToTell = me.tellInterval;
+            console.log('Generation: ' + me.generation, '\nLeading EntityID: ' + me.lastBestCreature.entityID,'\nLeading Time Lived: ' + me.lastBestCreature.timeLived, '\nBest Fitness: ' + me.lastBestFitness);
         }
     }
 
@@ -488,5 +499,6 @@ function Evolver() {
         creature.health = 10;
         creature.score = 0;
         creature.sprite.position = SCREEN_SIZE.clone().randomize();
+        creature.timeLived = 0;
     }
 }
