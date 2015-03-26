@@ -450,7 +450,7 @@ function Evolver() {
 
 			if (creatures[i].score > me.lastBestFitness) {
 				me.lastBestFitness = creatures[i].score;
-				me.lastBestGenome = creatures[i].logicCircuit.genome;
+				me.lastBestCreature = creatures[i];
 			}
         }
 
