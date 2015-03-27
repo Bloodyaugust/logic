@@ -1,6 +1,30 @@
-SL = sugarLab;
+var window, SL;
+if (!window) {
+    GLOBAL.window = {};
+    require('./lib/SugarLab.js');
+    SL = GLOBAL.window.sugarLab;
+} else {
+    SL = sugarLab;
+}
 
-var SCREEN_SIZE = new SL.Vec2(800, 600);
+var SCREEN_SIZE = new SL.Vec2(800, 600),
+    GENERATION_COLORS = [
+        0xFF0000,
+        0x00FF00,
+        0x0000FF,
+        0xF00000,
+        0x00F000,
+        0x0000F0,
+        0x0F0000,
+        0x000F00,
+        0x00000F,
+        0xFFFF00,
+        0xFF00FF,
+        0x00FFFF,
+        0xF0000F,
+        0xF000F0,
+        0xF00F00
+    ];
 
 function logPlay() {
     _gaq.push(['_trackEvent', 'Button', 'Play']);
@@ -85,7 +109,8 @@ function start() {
 							inputs: 4,
 							outputs: 4,
 							genomeLength: 64
-						})
+						}),
+                        generation: i
 					}))
 				}
 
@@ -104,9 +129,10 @@ function Creature(config) {
     var me = this;
 
     me.tag = 'creature';
-	me.health = 10;
+	me.health = 5;
 	me.score = 0;
     me.timeLived = 0;
+    me.generation = config.generation || 0;
     me.sprite = new PIXI.Sprite(app.assetCollection.getTexture(me.tag));
     me.sprite.anchor.x = 0.5;
     me.sprite.anchor.y = 0.5;
@@ -165,9 +191,9 @@ function Creature(config) {
 
 			for (var i = 0; i < food.length; i ++) {
 				if (me.sprite.position.distance(food[i].sprite.position) <= 15) {
-					me.health += 10;
+					me.health += 2;
 					food[i].eaten = true;
-					me.score += 500;
+					me.score += 200;
 				}
 			}
 
@@ -177,6 +203,12 @@ function Creature(config) {
             }
 
 			me.score += 1;
+
+            if (GENERATION_COLORS[me.generation]) {
+                me.sprite.tint = GENERATION_COLORS[me.generation];
+            } else {
+                GENERATION_COLORS.push(Math.random() * 0xFFFFFF);
+            }
 		}
     }
 
@@ -292,6 +324,17 @@ function LogicGate(config) {
                 break;
         }
     }
+
+    me.clone = function () {
+        return {
+            tag: 'gate',
+            type: me.type,
+            sources: [],
+            circuit: {},
+            circuitIndex: me.circuitIndex,
+            out: 0
+        };
+    }
 }
 
 function LogicCircuit(genome) {
@@ -346,6 +389,37 @@ function LogicCircuit(genome) {
         }
 
         return output;
+    }
+
+    me.clone = function () {
+        var clone = {
+            genome: me.genome,
+            gates: [],
+            gateTypes: me.gateTypes,
+            input: [],
+            outputs: []
+        };
+
+        for (var i = 0; i < me.gates.length; i++) {
+            clone.gates.push(me.gates[i].clone());
+        }
+
+        for (i = 0; i < clone.gates.length; i++) {
+            clone.gates[i].circuit = clone;
+
+            clone.gates[i].sources[0] = me.gates[i].sources[0].tag === 'gate' ?
+                clone.gates[me.gates[i].sources[0].circuitIndex] :
+                me.gates[i].sources[0];
+            clone.gates[i].sources[1] = me.gates[i].sources[1].tag === 'gate' ?
+                clone.gates[me.gates[i].sources[1].circuitIndex] :
+                me.gates[i].sources[1];
+        }
+
+        for (i = 0; i < me.outputs.length; i++) {
+            clone.outputs.push(clone.gates[me.outputs[i].circuitIndex]);
+        }
+
+        return clone;
     }
 }
 
@@ -417,7 +491,7 @@ function Evolver() {
     me.generation = 0;
     me.mutationRate = 0.01;
     me.generationalRate = 0.2;
-    me.lastBestCreature = app.currentScene.getEntitiesByTag('creature')[0];
+    me.lastBestCircuit = app.currentScene.getEntitiesByTag('creature')[0].logicCircuit.clone();
     me.lastBestFitness = 0;
     me.gateTypes = [
         'AND',
@@ -431,7 +505,8 @@ function Evolver() {
     me.timeToTell = me.tellInterval;
 
     me.update = function() {
-        var creatures = app.currentScene.getEntitiesByTag('creature');
+        var creatures = app.currentScene.getEntitiesByTag('creature'),
+            bestCreature = creatures[0];
 
         for (var i = 0; i < creatures.length; i++) {
             if (creatures[i].health <= 0) {
@@ -443,6 +518,7 @@ function Evolver() {
                     });
                     creatures[i].sprite.position = SCREEN_SIZE.clone().randomize();
                     me.generation++;
+                    creatures[i].generation = me.generation;
                 } else {
                     me.mutateCreature(creatures[i]);
                 }
@@ -450,19 +526,31 @@ function Evolver() {
 
 			if (creatures[i].score > me.lastBestFitness) {
 				me.lastBestFitness = creatures[i].score;
-				me.lastBestCreature = creatures[i];
+				me.lastBestCircuit = creatures[i].logicCircuit.clone();
 			}
+
+            if (creatures[i].score > bestCreature.score) {
+                bestCreature = creatures[i];
+            }
+        }
+
+        for (i = 0; i < creatures.length; i++) {
+            if (creatures[i].entityID === bestCreature.entityID) {
+                creatures[i].sprite.alpha = 1;
+            } else {
+                creatures[i].sprite.alpha = 0.1;
+            }
         }
 
         me.timeToTell -= app.deltaTime;
         if (me.timeToTell <= 0) {
             me.timeToTell = me.tellInterval;
-            console.log('Generation: ' + me.generation, '\nLeading EntityID: ' + me.lastBestCreature.entityID,'\nLeading Time Lived: ' + me.lastBestCreature.timeLived, '\nBest Fitness: ' + me.lastBestFitness);
+            console.log('Generation: ' + me.generation, '\nBest Fitness: ' + me.lastBestFitness, '\nLeading EntityID: ' + bestCreature.entityID,'\nLeading Time Lived: ' + bestCreature.timeLived.toPrecision(2), '\nLeading Fitness: ' + bestCreature.score);
         }
     }
 
     me.mutateCreature = function(creature) {
-        var baseCircuit = me.lastBestCreature.logicCircuit,
+        var baseCircuit = me.lastBestCircuit,
             mutateCircuit = creature.logicCircuit;
 
         for (var i = 0; i < baseCircuit.gates.length; i++) {
@@ -496,7 +584,7 @@ function Evolver() {
             }
         }
 
-        creature.health = 10;
+        creature.health = 5;
         creature.score = 0;
         creature.sprite.position = SCREEN_SIZE.clone().randomize();
         creature.timeLived = 0;
